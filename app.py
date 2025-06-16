@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import json
 from datetime import datetime
 
@@ -120,16 +119,16 @@ def main():
             st.info("저장된 데이터가 없습니다.")
         
         # 데이터 내보내기
-        if st.button("📤 Excel로 내보내기"):
+        if st.button("📤 JSON으로 내보내기"):
             if st.session_state.msds_data:
-                df = pd.DataFrame([st.session_state.msds_data])
+                json_data = json.dumps(st.session_state.msds_data, indent=2, ensure_ascii=False)
                 st.download_button(
-                    label="💾 Excel 파일 다운로드",
-                    data=df.to_csv(index=False).encode('utf-8-sig'),
-                    file_name=f"MSDS_데이터_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
+                    label="💾 JSON 파일 다운로드",
+                    data=json_data,
+                    file_name=f"MSDS_데이터_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
                 )
-                st.success("Excel 파일이 준비되었습니다!")
+                st.success("JSON 파일이 준비되었습니다!")
             else:
                 st.warning("저장된 데이터가 없습니다.")
 
@@ -179,14 +178,32 @@ def tab1_form():
         # 날짜 입력
         col_date1, col_date2 = st.columns(2)
         with col_date1:
+            try:
+                saved_creation_date = st.session_state.msds_data.get("1_creation_date")
+                if saved_creation_date:
+                    creation_date_value = datetime.fromisoformat(saved_creation_date).date()
+                else:
+                    creation_date_value = datetime.now().date()
+            except:
+                creation_date_value = datetime.now().date()
+                
             creation_date = st.date_input(
                 "최초작성일",
-                value=pd.to_datetime(st.session_state.msds_data.get("1_creation_date", datetime.now().date())).date()
+                value=creation_date_value
             )
         with col_date2:
+            try:
+                saved_revision_date = st.session_state.msds_data.get("1_revision_date")
+                if saved_revision_date:
+                    revision_date_value = datetime.fromisoformat(saved_revision_date).date()
+                else:
+                    revision_date_value = datetime.now().date()
+            except:
+                revision_date_value = datetime.now().date()
+                
             revision_date = st.date_input(
                 "최종개정일",
-                value=pd.to_datetime(st.session_state.msds_data.get("1_revision_date", datetime.now().date())).date()
+                value=revision_date_value
             )
         
         # MSDS 정보 표 생성
@@ -250,117 +267,77 @@ def tab1_form():
     # 나. 권고용도
     st.subheader("나. 제품의 권고 용도와 사용상의 제한")
     
-    # 권고용도 선택 (카테고리별 라디오 버튼)
+    # 권고용도 선택 (설명이 포함된 드롭다운)
     st.markdown("##### 권고 용도 선택")
     
-    # 카테고리별로 그룹핑
-    categories_dict = {}
-    for use in RECOMMENDED_USES:
-        if use["category"] not in categories_dict:
-            categories_dict[use["category"]] = []
-        categories_dict[use["category"]].append(use)
-    
-    # 이전 선택값 복원
+    # 이전에 선택된 값이 있으면 해당 인덱스 찾기
+    default_index = 0
     saved_use_code = st.session_state.msds_data.get("1_recommended_use_code", "")
     
-    # 카테고리 선택
-    category_names = list(categories_dict.keys())
-    selected_category = st.selectbox(
-        "🎯 1단계: 카테고리 선택",
-        ["카테고리를 선택하세요"] + category_names,
-        help="먼저 해당하는 대분류를 선택해주세요"
+    # 드롭다운 옵션 생성 (용도명 + 축약된 설명)
+    use_options = ["📋 권고용도를 선택해주세요"]
+    use_codes = [""]
+    
+    for use in RECOMMENDED_USES:
+        # 설명을 30자로 제한하여 드롭다운에 표시
+        short_desc = use['description'][:30] + "..." if len(use['description']) > 30 else use['description']
+        
+        # 형식: "코드. 용도명 - 간단한설명"
+        display_text = f"{use['code']}. {use['name']} - {short_desc}"
+        use_options.append(display_text)
+        use_codes.append(use['code'])
+        
+        # 이전 선택값과 일치하는지 확인
+        if use['code'] == saved_use_code:
+            default_index = len(use_options) - 1
+    
+    # selectbox 생성
+    selected_option = st.selectbox(
+        "권고 용도",
+        use_options,
+        index=default_index,
+        help="제품의 주요 사용 목적에 해당하는 용도를 선택해주세요"
     )
     
-    recommended_use_code = ""
-    recommended_use_name = ""
+    # 선택된 용도 처리
+    selected_index = use_options.index(selected_option)
     
-    if selected_category != "카테고리를 선택하세요":
-        st.markdown(f"##### 🎯 2단계: {selected_category} 세부 용도 선택")
+    if selected_index > 0:  # "선택해주세요"가 아닌 경우
+        selected_code = use_codes[selected_index]
+        selected_use = next((use for use in RECOMMENDED_USES if use["code"] == selected_code), None)
         
-        # 해당 카테고리의 용도들
-        category_uses = categories_dict[selected_category]
-        
-        # 라디오 버튼 옵션 생성 (용도명 + 작은 설명)
-        radio_options = []
-        radio_values = []
-        
-        for use in category_uses:
-            # 용도명과 설명을 함께 표시
-            display_text = f"{use['code']}. {use['name']}"
-            radio_options.append(display_text)
-            radio_values.append(use['code'])
-        
-        # 이전 선택값이 현재 카테고리에 있는지 확인
-        default_index = 0
-        if saved_use_code in radio_values:
-            default_index = radio_values.index(saved_use_code)
-        
-        # 라디오 버튼으로 선택
-        if radio_options:
-            selected_radio = st.radio(
-                "세부 용도",
-                radio_options,
-                index=default_index,
-                key=f"radio_{selected_category}"
-            )
-            
-            # 선택된 용도의 상세 정보
-            selected_index = radio_options.index(selected_radio)
-            selected_use = category_uses[selected_index]
-            
-            # 선택된 용도 아래에 설명 표시
+        if selected_use:
+            # 선택된 용도의 전체 정보 카드로 표시
             st.markdown(f"""
             <div style="
-                background: #f0f2f6;
-                padding: 10px 15px;
-                border-radius: 8px;
-                border-left: 4px solid #667eea;
-                margin: 10px 0;
-                font-size: 13px;
-                color: #333;
-                line-height: 1.4;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 15px;
+                border-radius: 10px;
+                margin: 15px 0;
+                color: white;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             ">
-                📝 <strong>설명:</strong> {selected_use['description']}
+                <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                    ✅ {selected_use['code']}. {selected_use['name']}
+                </div>
+                <div style="font-size: 12px; opacity: 0.9; margin-bottom: 8px;">
+                    📂 카테고리: {selected_use['category']}
+                </div>
+                <div style="font-size: 13px; line-height: 1.4; opacity: 0.95; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 5px;">
+                    📝 전체 설명: {selected_use['description']}
+                </div>
             </div>
             """, unsafe_allow_html=True)
             
             recommended_use_code = selected_use["code"]
             recommended_use_name = selected_use["name"]
-            
-            # 최종 선택 확인
-            st.success(f"✅ **선택됨:** {selected_use['code']}. {selected_use['name']}")
-    
-    else:
-        st.info("⬆️ 위에서 카테고리를 먼저 선택해주세요.")
-    
-    # 전체 용도 빠른 참조 (접을 수 있는 형태)
-    with st.expander("📚 전체 용도 빠른 참조"):
-        st.markdown("모든 용도를 한눈에 보고 싶으시면 펼쳐보세요.")
-        
-        # 검색 기능
-        quick_search = st.text_input("🔍 빠른 검색", placeholder="키워드 입력...")
-        
-        if quick_search:
-            filtered_uses = [
-                use for use in RECOMMENDED_USES 
-                if quick_search.lower() in use["name"].lower() 
-                or quick_search.lower() in use["description"].lower()
-            ]
         else:
-            filtered_uses = RECOMMENDED_USES
-        
-        # 테이블 형태로 표시
-        if filtered_uses:
-            for use in filtered_uses:
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    if st.button(f"선택", key=f"quick_{use['code']}", type="secondary"):
-                        st.session_state.msds_data["1_recommended_use_code"] = use["code"]
-                        st.experimental_rerun()
-                with col2:
-                    st.write(f"**{use['code']}. {use['name']}** ({use['category']})")
-                    st.caption(f"📝 {use['description']}")
-                st.divider()
+            recommended_use_code = ""
+            recommended_use_name = ""
+    else:
+        st.info("⬆️ 위 드롭다운에서 권고용도를 선택해주세요.")
+        recommended_use_code = ""
+        recommended_use_name = ""
     
     # 사용상의 제한
     usage_restrictions = st.text_area(
